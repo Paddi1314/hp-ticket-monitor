@@ -15,10 +15,7 @@ URL = "https://book.wbstudiotour.com/?event_type_id=2&language_id=1&site_id=1"
 def send_telegram(text):
     requests.post(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        data={
-            "chat_id": CHAT_ID,
-            "text": text
-        },
+        data={"chat_id": CHAT_ID, "text": text},
         timeout=20
     )
 
@@ -52,9 +49,24 @@ with sync_playwright() as p:
         });
     """)
 
+    session_info = {}
+
+    def handle_response(response):
+        url = response.url
+        if "/api/createNewSession" in url:
+            try:
+                data = response.json()
+                if data.get("success") and data.get("data"):
+                    session_info["session_id"] = data["data"][0]["session_id"]
+                    session_info["secret"] = data["data"][0]["secret"]
+                    print("抓到页面自己的 session:", session_info)
+            except Exception as e:
+                print("读取 createNewSession 失败:", e)
+
+    page.on("response", handle_response)
+
     page.on("console", lambda msg: print(f"CONSOLE [{msg.type}] {msg.text}"))
     page.on("pageerror", lambda err: print(f"PAGEERROR {err}"))
-    page.on("requestfailed", lambda req: print(f"FAILED {req.url} -> {req.failure}"))
 
     print("打开页面...")
     page.goto(URL, wait_until="domcontentloaded")
@@ -68,115 +80,77 @@ with sync_playwright() as p:
     print("当前标题：", page.title())
     print("当前URL：", page.url)
 
+    page.wait_for_timeout(5000)
+
     if "tickets" not in page.url:
-        send_telegram("⚠️ 监控失败：没有通过 Queue，仍停留在排队页。")
+        send_telegram("⚠️ 监控失败：没有通过 Queue。")
         browser.close()
         raise SystemExit()
 
-    print("创建新 Session 并查询票务...")
+    if not session_info:
+        print("没有抓到 createNewSession，等待更久...")
+        page.wait_for_timeout(10000)
 
-    result = page.evaluate(f"""
-    async () => {{
-        const createRes = await fetch("https://book.wbstudiotour.com/api/createNewSession", {{
-            method: "POST",
-            credentials: "include",
-            headers: {{
-                "Content-Type": "application/x-www-form-urlencoded",
-                "X-Requested-With": "XMLHttpRequest"
-            }},
-            body: new URLSearchParams({{
-                site_id: "1",
-                event_type_id: "2",
-                device_type: "Desktop",
-                resolution_width: "1707",
-                resolution_height: "960",
-                user_agent: navigator.userAgent
-            }}).toString()
-        }});
+    if not session_info:
+        send_telegram("❌ 监控失败：没有抓到页面自己的 session。")
+        browser.close()
+        raise SystemExit()
 
-        const createText = await createRes.text();
+    session_id = session_info["session_id"]
+    secret = session_info["secret"]
 
-        let createJson;
-        try {{
-            createJson = JSON.parse(createText);
-        }} catch (e) {{
-            return {{
-                ok: false,
-                step: "createNewSession_parse",
-                text: createText
-            }};
-        }}
+    print("使用页面自己的 session 查询票务...")
+    print("session_id:", session_id)
+    print("secret:", secret)
 
-        if (!createJson.success) {{
-            return {{
-                ok: false,
-                step: "createNewSession",
-                data: createJson
-            }};
-        }}
+    result = page.evaluate(
+        """async ({sessionId, secret, targetDate}) => {
+            const stateRes = await fetch("https://book.wbstudiotour.com/api/getSessionState", {
+                method: "POST",
+                credentials: "include",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "X-Requested-With": "XMLHttpRequest"
+                },
+                body: new URLSearchParams({
+                    session_id: String(sessionId),
+                    secret: secret
+                }).toString()
+            });
 
-        const session = createJson.data[0];
-        const sessionId = session.session_id;
-        const secret = session.secret;
+            const stateText = await stateRes.text();
 
-        const stateRes = await fetch("https://book.wbstudiotour.com/api/getSessionState", {{
-            method: "POST",
-            credentials: "include",
-            headers: {{
-                "Content-Type": "application/x-www-form-urlencoded",
-                "X-Requested-With": "XMLHttpRequest"
-            }},
-            body: new URLSearchParams({{
-                session_id: String(sessionId),
-                secret: secret
-            }}).toString()
-        }});
+            const eventsRes = await fetch("https://book.wbstudiotour.com/api/getEvents", {
+                method: "POST",
+                credentials: "include",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Requested-With": "XMLHttpRequest"
+                },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    secret: secret,
+                    site_id: 1,
+                    ticket_count: 0,
+                    event_id: 2,
+                    start_date: targetDate,
+                    end_date: targetDate
+                })
+            });
 
-        const stateText = await stateRes.text();
+            const eventsText = await eventsRes.text();
 
-        const eventsRes = await fetch("https://book.wbstudiotour.com/api/getEvents", {{
-            method: "POST",
-            credentials: "include",
-            headers: {{
-                "Content-Type": "application/json",
-                "X-Requested-With": "XMLHttpRequest"
-            }},
-            body: JSON.stringify({{
-                session_id: sessionId,
-                secret: secret,
-                site_id: 1,
-                ticket_count: 0,
-                event_id: 2,
-                start_date: "{TARGET_DATE}",
-                end_date: "{TARGET_DATE}"
-            }})
-        }});
-
-        const eventsText = await eventsRes.text();
-
-        let eventsJson;
-        try {{
-            eventsJson = JSON.parse(eventsText);
-        }} catch (e) {{
-            return {{
-                ok: false,
-                step: "getEvents_parse",
-                session_id: sessionId,
-                secret: secret,
-                stateText: stateText,
-                text: eventsText
-            }};
-        }}
-
-        return {{
-            ok: true,
-            session_id: sessionId,
-            secret: secret,
-            stateText: stateText,
-            events: eventsJson
-        }};
-    }}
-    """)
+            return {
+                stateText,
+                eventsText
+            };
+        }""",
+        {
+            "sessionId": session_id,
+            "secret": secret,
+            "targetDate": TARGET_DATE
+        }
+    )
 
     print("查询结果：")
     print(json.dumps(result, indent=2, ensure_ascii=False))
@@ -184,24 +158,18 @@ with sync_playwright() as p:
     browser.close()
 
 
-if not result.get("ok"):
-    send_telegram(
-        "❌ 监控失败\n"
-        f"步骤：{result.get('step')}\n"
-        f"内容：{str(result)[:1000]}"
-    )
+try:
+    events = json.loads(result["eventsText"])
+except Exception:
+    send_telegram("❌ 监控失败：getEvents 返回不是 JSON")
     raise SystemExit()
-
-
-events = result["events"]
 
 if not events.get("success"):
     send_telegram(
         "❌ getEvents 查询失败\n"
-        f"{json.dumps(events, ensure_ascii=False)[:1000]}"
+        + result["eventsText"][:1000]
     )
     raise SystemExit()
-
 
 matched = []
 
