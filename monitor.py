@@ -12,18 +12,15 @@ with sync_playwright() as p:
 
     page.wait_for_timeout(10000)
 
-    print("Arkose对象:")
-
     print(
         page.evaluate("""
         () => {
-            if (!window.Arkose)
-                return "Arkose不存在";
-
             return {
-                version: Arkose.version,
-                config: Arkose.getConfig()
-            };
+                arkose: typeof Arkose,
+                selector: document.querySelector("#arkose-ec") !== null,
+                body: document.body.innerHTML.includes("arkose"),
+                scripts: [...document.scripts].map(x=>x.src)
+            }
         }
         """)
     )
