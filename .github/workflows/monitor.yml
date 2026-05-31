@@ -19,6 +19,8 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      - run: playwright install chromium
+
       - run: python monitor.py
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
