@@ -12,21 +12,20 @@ with sync_playwright() as p:
 
     page.wait_for_timeout(10000)
 
-    print("标题：", page.title())
+    print("Arkose对象:")
 
-    print("URL：", page.url)
-
-    print("\n===== LocalStorage =====")
-
-    print(page.evaluate("""
+    print(
+        page.evaluate("""
         () => {
-            let r = {};
-            for(let i=0;i<localStorage.length;i++){
-                let k = localStorage.key(i);
-                r[k] = localStorage.getItem(k);
-            }
-            return r;
+            if (!window.Arkose)
+                return "Arkose不存在";
+
+            return {
+                version: Arkose.version,
+                config: Arkose.getConfig()
+            };
         }
-    """))
+        """)
+    )
 
     browser.close()
