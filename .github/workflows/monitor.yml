@@ -1,9 +1,8 @@
-name: Ticket Monitor
+name: WB Ticket Monitor
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
-
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 jobs:
