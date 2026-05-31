@@ -1,60 +1,17 @@
-import os
-import requests
+from playwright.sync_api import sync_playwright
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-CHAT_ID = os.environ["CHAT_ID"]
+with sync_playwright() as p:
+    browser = p.chromium.launch(headless=True)
 
-SESSION_ID = "7373385898"
-SECRET = "yaihjanwndsdttt"
+    page = browser.new_page()
 
-s = requests.Session()
+    page.goto(
+        "https://book.wbstudiotour.com/?event_type_id=2&language_id=1&site_id=1",
+        wait_until="networkidle"
+    )
 
-url = "https://book.wbstudiotour.com/api/getEvents"
+    print("标题：", page.title())
 
-payload = {
-    "session_id": int(SESSION_ID),
-    "secret": SECRET,
-    "site_id": 1,
-    "ticket_count": 0,
-    "event_id": 2,
-    "start_date": "2026-07-26",
-    "end_date": "2026-07-26"
-}
+    print("当前URL：", page.url)
 
-r = s.post(url, json=payload)
-
-print(r.text)
-
-data = r.json()
-
-if data.get("success"):
-
-    events = data.get("data", [])
-
-    found = False
-
-    for e in events:
-
-        if e["startTime"] <= "14:30" and e["available"] > 0:
-
-            found = True
-
-            msg = (
-                f"🎉 发现票！\n"
-                f"时间: {e['startTime']}\n"
-                f"余票: {e['available']}"
-            )
-
-            requests.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                data={
-                    "chat_id": CHAT_ID,
-                    "text": msg
-                }
-            )
-
-    if not found:
-        print("没有目标票")
-
-else:
-    print("查询失败")
+    browser.close()
