@@ -8,7 +8,6 @@ CHAT_ID = os.environ["CHAT_ID"]
 
 TARGET_DATE = "2026-07-26"
 TARGET_LATEST_TIME = "14:30"
-
 URL = "https://book.wbstudiotour.com/?event_type_id=2&language_id=1&site_id=1"
 
 
@@ -42,43 +41,33 @@ with sync_playwright() as p:
     )
 
     page = context.new_page()
-
-    page.add_init_script("""
-        Object.defineProperty(navigator, 'webdriver', {
-            get: () => undefined
-        });
-    """)
+    page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
 
     session_info = {}
 
     def handle_response(response):
-        url = response.url
-        if "/api/createNewSession" in url:
+        if "/api/createNewSession" in response.url:
             try:
                 data = response.json()
                 if data.get("success") and data.get("data"):
                     session_info["session_id"] = data["data"][0]["session_id"]
                     session_info["secret"] = data["data"][0]["secret"]
-                    print("抓到页面自己的 session:", session_info)
+                    print("抓到 session:", session_info)
             except Exception as e:
-                print("读取 createNewSession 失败:", e)
+                print("读取 session 失败:", e)
 
     page.on("response", handle_response)
-
-    page.on("console", lambda msg: print(f"CONSOLE [{msg.type}] {msg.text}"))
-    page.on("pageerror", lambda err: print(f"PAGEERROR {err}"))
 
     print("打开页面...")
     page.goto(URL, wait_until="domcontentloaded")
 
-    print("等待进入 Tickets 页面...")
     try:
         page.wait_for_url("**/tickets?language_id=1", timeout=90000)
     except Exception:
-        print("没有自动进入 Tickets 页面，当前：", page.title(), page.url)
+        print("未进入 tickets，当前：", page.title(), page.url)
 
-    print("当前标题：", page.title())
-    print("当前URL：", page.url)
+    print("标题：", page.title())
+    print("URL：", page.url)
 
     page.wait_for_timeout(5000)
 
@@ -88,20 +77,12 @@ with sync_playwright() as p:
         raise SystemExit()
 
     if not session_info:
-        print("没有抓到 createNewSession，等待更久...")
         page.wait_for_timeout(10000)
 
     if not session_info:
-        send_telegram("❌ 监控失败：没有抓到页面自己的 session。")
+        send_telegram("❌ 监控失败：没有抓到 session。")
         browser.close()
         raise SystemExit()
-
-    session_id = session_info["session_id"]
-    secret = session_info["secret"]
-
-    print("使用页面自己的 session 查询票务...")
-    print("session_id:", session_id)
-    print("secret:", secret)
 
     result = page.evaluate(
         """async ({sessionId, secret, targetDate}) => {
@@ -140,14 +121,11 @@ with sync_playwright() as p:
 
             const eventsText = await eventsRes.text();
 
-            return {
-                stateText,
-                eventsText
-            };
+            return { stateText, eventsText };
         }""",
         {
-            "sessionId": session_id,
-            "secret": secret,
+            "sessionId": session_info["session_id"],
+            "secret": session_info["secret"],
             "targetDate": TARGET_DATE
         }
     )
@@ -158,17 +136,10 @@ with sync_playwright() as p:
     browser.close()
 
 
-try:
-    events = json.loads(result["eventsText"])
-except Exception:
-    send_telegram("❌ 监控失败：getEvents 返回不是 JSON")
-    raise SystemExit()
+events = json.loads(result["eventsText"])
 
 if not events.get("success"):
-    send_telegram(
-        "❌ getEvents 查询失败\n"
-        + result["eventsText"][:1000]
-    )
+    send_telegram("❌ getEvents 查询失败\n" + result["eventsText"][:1000])
     raise SystemExit()
 
 matched = []
